@@ -914,703 +914,1175 @@ main_recovery() {
 main_recovery
 ```
 
-Bu genişləndirmə ilə Netflix arxitekturası sənədi daha da ətraflı və professional oldu. Növbəti hissələri də əlavə edə bilərəm?
+Bu genişləndirmə ilə Netflix arxitekturası sənədi daha da ətraflı və texniki cəhətdən zəngin oldu. Növbəti hissələri də əlavə edək?
 
 ---
 
-## Machine Learning və AI İnteqrasiyası
+## DevOps və CI/CD Pipeline
 
-### 🤖 AI-Powered Content Optimization
+### 🚀 Continuous Integration/Continuous Deployment
 
-#### Personalized Encoding
-```python
-# AI əsaslı kodlaşdırma optimallaşdırması
-class PersonalizedEncoder:
-    def __init__(self):
-        self.quality_model = load_perceptual_quality_model()
-        self.user_preference_model = load_user_model()
-        self.device_capability_db = DeviceCapabilityDatabase()
+#### Netflix Spinnaker Pipeline
+```yaml
+# Spinnaker pipeline konfiqurasiyası
+application: netflix-streaming-service
+name: production-deployment-pipeline
+
+stages:
+  - name: "Build & Test"
+    type: jenkins
+    job: "streaming-service-build"
+    parameters:
+      BRANCH: "${trigger.branch}"
+      BUILD_NUMBER: "${trigger.buildNumber}"
     
-    def optimize_encoding(self, content_id, user_profile, device_info):
-        # İstifadəçi tərcihləri təhlili
-        user_preferences = self.user_preference_model.predict(user_profile)
-        
-        # Cihaz imkanları təhlili
-        device_caps = self.device_capability_db.get_capabilities(device_info)
-        
-        # Optimal kodlaşdırma parametrləri
-        encoding_params = {
-            'resolution': self.select_optimal_resolution(device_caps, user_preferences),
-            'bitrate': self.calculate_optimal_bitrate(content_id, user_preferences),
-            'codec': self.select_best_codec(device_caps),
-            'quality_preset': self.determine_quality_preset(user_preferences)
+  - name: "Security Scan"
+    type: script
+    script: |
+      # SAST (Static Application Security Testing)
+      sonar-scanner -Dsonar.projectKey=streaming-service
+      
+      # Dependency vulnerability scan
+      npm audit --audit-level high
+      
+      # Container image scan
+      trivy image netflix/streaming-service:${BUILD_NUMBER}
+    
+  - name: "Canary Deployment"
+    type: deploy
+    clusters:
+      - account: "production"
+        application: "streaming-service"
+        stack: "canary"
+        strategy: "redblack"
+        capacity:
+          min: 2
+          max: 4
+          desired: 2
+        targetHealthyDeployPercentage: 100
+    
+  - name: "Canary Analysis"
+    type: kayenta
+    canaryConfig:
+      scoreThresholds:
+        pass: 95
+        marginal: 75
+      analysisType: "RealTime"
+      metricsAccountName: "prometheus"
+      storageAccountName: "s3"
+      
+  - name: "Production Deployment"
+    type: deploy
+    dependsOn: ["Canary Analysis"]
+    clusters:
+      - account: "production"
+        application: "streaming-service"
+        stack: "main"
+        strategy: "rollingpush"
+        capacity:
+          min: 50
+          max: 200
+          desired: 100
+
+triggers:
+  - type: git
+    source: github
+    project: netflix
+    slug: streaming-service
+    branch: main
+    
+notifications:
+  - type: slack
+    channel: "#deployments"
+    when: ["pipeline.starting", "pipeline.complete", "pipeline.failed"]
+```
+
+#### Infrastructure as Code (Terraform)
+```hcl
+# Netflix infrastructure Terraform konfiqurasiyası
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
+  }
+}
+
+# EKS Cluster
+module "eks" {
+  source = "terraform-aws-modules/eks/aws"
+  
+  cluster_name    = "netflix-streaming-cluster"
+  cluster_version = "1.28"
+  
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnets
+  
+  node_groups = {
+    streaming_nodes = {
+      desired_capacity = 100
+      max_capacity     = 500
+      min_capacity     = 50
+      
+      instance_types = ["c5.2xlarge", "c5.4xlarge"]
+      
+      k8s_labels = {
+        Environment = "production"
+        Application = "streaming"
+      }
+      
+      additional_tags = {
+        "kubernetes.io/cluster/netflix-streaming-cluster" = "owned"
+      }
+    }
+    
+    encoding_nodes = {
+      desired_capacity = 20
+      max_capacity     = 100
+      min_capacity     = 10
+      
+      instance_types = ["c5.9xlarge", "c5.12xlarge"]
+      
+      k8s_labels = {
+        Environment = "production"
+        Application = "encoding"
+        workload    = "cpu-intensive"
+      }
+      
+      taints = [
+        {
+          key    = "encoding-workload"
+          value  = "true"
+          effect = "NO_SCHEDULE"
         }
-        
-        return encoding_params
-    
-    def predict_quality_score(self, encoded_content, original_content):
-        features = self.extract_quality_features(encoded_content, original_content)
-        return self.quality_model.predict(features)
+      ]
+    }
+  }
+}
+
+# Auto Scaling Groups
+resource "aws_autoscaling_group" "oca_servers" {
+  name                = "netflix-oca-asg"
+  vpc_zone_identifier = module.vpc.private_subnets
+  target_group_arns   = [aws_lb_target_group.oca.arn]
+  
+  min_size         = 10
+  max_size         = 1000
+  desired_capacity = 50
+  
+  launch_template {
+    id      = aws_launch_template.oca.id
+    version = "$Latest"
+  }
+  
+  tag {
+    key                 = "Name"
+    value               = "Netflix-OCA-Server"
+    propagate_at_launch = true
+  }
+  
+  # Scaling policies
+  enabled_metrics = [
+    "GroupMinSize",
+    "GroupMaxSize",
+    "GroupDesiredCapacity",
+    "GroupInServiceInstances",
+    "GroupTotalInstances"
+  ]
+}
+
+# CloudWatch Alarms for Auto Scaling
+resource "aws_cloudwatch_metric_alarm" "high_cpu" {
+  alarm_name          = "netflix-oca-high-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "120"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "This metric monitors ec2 cpu utilization"
+  alarm_actions       = [aws_autoscaling_policy.scale_up.arn]
+  
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.oca_servers.name
+  }
+}
 ```
 
-#### Content Recommendation Engine
-```python
-# Netflix tövsiyə sistemi
-class RecommendationEngine:
-    def __init__(self):
-        self.collaborative_filter = CollaborativeFilteringModel()
-        self.content_based_filter = ContentBasedModel()
-        self.deep_learning_model = DeepRecommendationModel()
-        self.trending_analyzer = TrendingContentAnalyzer()
-    
-    def generate_recommendations(self, user_id, context=None):
-        # Müxtəlif modellər üzrə tövsiyələr
-        collab_recs = self.collaborative_filter.recommend(user_id, top_k=50)
-        content_recs = self.content_based_filter.recommend(user_id, top_k=50)
-        dl_recs = self.deep_learning_model.recommend(user_id, context, top_k=50)
-        trending_recs = self.trending_analyzer.get_trending_for_user(user_id)
-        
-        # Ensemble method ilə birləşdirmə
-        final_recommendations = self.ensemble_recommendations([
-            (collab_recs, 0.3),
-            (content_recs, 0.2),
-            (dl_recs, 0.4),
-            (trending_recs, 0.1)
-        ])
-        
-        return final_recommendations[:20]  # Top 20 tövsiyə
-    
-    def real_time_personalization(self, user_id, current_session):
-        # Real-time istifadəçi davranışı təhlili
-        session_features = self.extract_session_features(current_session)
-        
-        # Dynamic tövsiyə yenilənməsi
-        updated_recs = self.deep_learning_model.update_recommendations(
-            user_id, session_features
-        )
-        
-        return updated_recs
+#### Kubernetes Deployment Manifests
+```yaml
+# Netflix streaming service Kubernetes deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streaming-service
+  namespace: netflix-production
+  labels:
+    app: streaming-service
+    version: v2.1.0
+spec:
+  replicas: 100
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  selector:
+    matchLabels:
+      app: streaming-service
+  template:
+    metadata:
+      labels:
+        app: streaming-service
+        version: v2.1.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: streaming-service
+        image: netflix/streaming-service:v2.1.0
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8443
+          name: https
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "production"
+        - name: JAVA_OPTS
+          value: "-Xmx4g -Xms2g -XX:+UseG1GC"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "6Gi"
+            cpu: "4000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        - name: secrets-volume
+          mountPath: /app/secrets
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: streaming-service-config
+      - name: secrets-volume
+        secret:
+          secretName: streaming-service-secrets
+      nodeSelector:
+        workload-type: "streaming"
+      tolerations:
+      - key: "streaming-workload"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: streaming-service
+  namespace: netflix-production
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 8443
+    protocol: TCP
+    name: https
+  selector:
+    app: streaming-service
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: streaming-service-hpa
+  namespace: netflix-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: streaming-service
+  minReplicas: 50
+  maxReplicas: 500
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: concurrent_streams_per_pod
+      target:
+        type: AverageValue
+        averageValue: "1000"
 ```
 
-### 🧠 Predictive Analytics
+### 🔧 GitOps və Configuration Management
 
-#### Traffic Prediction Model
+#### ArgoCD Application
+```yaml
+# ArgoCD application konfiqurasiyası
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: netflix-streaming-app
+  namespace: argocd
+spec:
+  project: netflix-production
+  source:
+    repoURL: https://github.com/netflix/k8s-manifests
+    targetRevision: HEAD
+    path: streaming-service/overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: netflix-production
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+```
+
+---
+
+## Cost Optimization və Resource Management
+
+### 💰 Cloud Cost Optimization
+
+#### AWS Cost Analysis
 ```python
-# Trafik proqnozlaşdırma sistemi
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+# Netflix AWS xərc analizi və optimallaşdırma
+import boto3
+from datetime import datetime, timedelta
 
-class TrafficPredictor:
+class NetflixCostOptimizer:
     def __init__(self):
-        self.model = self.build_lstm_model()
-        self.feature_scaler = StandardScaler()
-        self.target_scaler = StandardScaler()
+        self.ce_client = boto3.client('ce')  # Cost Explorer
+        self.ec2_client = boto3.client('ec2')
+        self.rds_client = boto3.client('rds')
+        self.s3_client = boto3.client('s3')
     
-    def build_lstm_model(self):
-        model = Sequential([
-            LSTM(128, return_sequences=True, input_shape=(24, 10)),  # 24 saat, 10 feature
-            Dropout(0.2),
-            LSTM(64, return_sequences=False),
-            Dropout(0.2),
-            Dense(32, activation='relu'),
-            Dense(1, activation='linear')  # Trafik proqnozu
-        ])
+    def analyze_monthly_costs(self, months=12):
+        """Aylıq xərc təhlili"""
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=30 * months)
         
-        model.compile(
-            optimizer='adam',
-            loss='mse',
-            metrics=['mae']
-        )
-        
-        return model
-    
-    def predict_traffic(self, historical_data, time_horizon=24):
-        # Məlumatların hazırlanması
-        features = self.prepare_features(historical_data)
-        scaled_features = self.feature_scaler.transform(features)
-        
-        # Proqnoz
-        predictions = self.model.predict(scaled_features)
-        scaled_predictions = self.target_scaler.inverse_transform(predictions)
-        
-        return scaled_predictions
-    
-    def prepare_features(self, data):
-        features = []
-        for record in data:
-            feature_vector = [
-                record['hour_of_day'],
-                record['day_of_week'],
-                record['is_weekend'],
-                record['is_holiday'],
-                record['concurrent_users'],
-                record['bandwidth_usage'],
-                record['popular_content_releases'],
-                record['weather_impact'],
-                record['regional_events'],
-                record['historical_average']
+        response = self.ce_client.get_cost_and_usage(
+            TimePeriod={
+                'Start': start_date.strftime('%Y-%m-%d'),
+                'End': end_date.strftime('%Y-%m-%d')
+            },
+            Granularity='MONTHLY',
+            Metrics=['BlendedCost', 'UsageQuantity'],
+            GroupBy=[
+                {'Type': 'DIMENSION', 'Key': 'SERVICE'},
+                {'Type': 'DIMENSION', 'Key': 'REGION'}
             ]
-            features.append(feature_vector)
+        )
         
-        return np.array(features)
-```
-
-#### Content Performance Analytics
-```python
-# Məzmun performans təhlili
-class ContentAnalytics:
-    def __init__(self):
-        self.engagement_model = EngagementPredictionModel()
-        self.churn_model = ChurnPredictionModel()
-        self.popularity_model = PopularityForecastModel()
+        return self.process_cost_data(response)
     
-    def analyze_content_performance(self, content_id, time_period='7d'):
-        metrics = {
-            'views': self.get_view_metrics(content_id, time_period),
-            'completion_rate': self.calculate_completion_rate(content_id, time_period),
-            'engagement_score': self.engagement_model.score(content_id),
-            'predicted_popularity': self.popularity_model.predict(content_id),
-            'churn_risk': self.churn_model.assess_content_impact(content_id)
+    def identify_cost_savings_opportunities(self):
+        """Xərc azaltma imkanlarının müəyyənləşdirilməsi"""
+        opportunities = []
+        
+        # 1. Unused EC2 instances
+        unused_instances = self.find_unused_ec2_instances()
+        if unused_instances:
+            opportunities.append({
+                'type': 'unused_ec2',
+                'instances': unused_instances,
+                'potential_savings': self.calculate_ec2_savings(unused_instances)
+            })
+        
+        # 2. Oversized instances
+        oversized_instances = self.find_oversized_instances()
+        if oversized_instances:
+            opportunities.append({
+                'type': 'oversized_instances',
+                'instances': oversized_instances,
+                'potential_savings': self.calculate_rightsizing_savings(oversized_instances)
+            })
+        
+        # 3. Unattached EBS volumes
+        unattached_volumes = self.find_unattached_ebs_volumes()
+        if unattached_volumes:
+            opportunities.append({
+                'type': 'unattached_ebs',
+                'volumes': unattached_volumes,
+                'potential_savings': self.calculate_ebs_savings(unattached_volumes)
+            })
+        
+        # 4. S3 storage optimization
+        s3_optimization = self.analyze_s3_storage_classes()
+        if s3_optimization:
+            opportunities.append({
+                'type': 's3_optimization',
+                'recommendations': s3_optimization,
+                'potential_savings': self.calculate_s3_savings(s3_optimization)
+            })
+        
+        return opportunities
+    
+    def implement_spot_instances(self, workload_type):
+        """Spot instance strategiyası"""
+        spot_strategies = {
+            'encoding': {
+                'instance_types': ['c5.9xlarge', 'c5.12xlarge', 'c5.18xlarge'],
+                'max_price': '0.50',  # USD per hour
+                'interruption_behavior': 'terminate',
+                'spot_fleet_target_capacity': 100
+            },
+            'batch_processing': {
+                'instance_types': ['m5.2xlarge', 'm5.4xlarge', 'm5.8xlarge'],
+                'max_price': '0.30',
+                'interruption_behavior': 'hibernate',
+                'spot_fleet_target_capacity': 50
+            },
+            'development': {
+                'instance_types': ['t3.medium', 't3.large', 't3.xlarge'],
+                'max_price': '0.10',
+                'interruption_behavior': 'stop',
+                'spot_fleet_target_capacity': 20
+            }
         }
         
-        return metrics
+        return spot_strategies.get(workload_type, {})
     
-    def optimize_content_placement(self, user_segments):
-        placement_strategy = {}
+    def reserved_instance_recommendations(self):
+        """Reserved Instance tövsiyələri"""
+        # Son 30 günün istifadə məlumatlarını təhlil et
+        usage_data = self.get_ec2_usage_data(days=30)
         
-        for segment in user_segments:
-            # Seqment üçün optimal məzmun yerləşdirmə
-            optimal_content = self.select_optimal_content_for_segment(segment)
-            placement_strategy[segment] = {
-                'homepage_carousel': optimal_content[:10],
-                'trending_section': optimal_content[10:20],
-                'recommended_for_you': optimal_content[20:40]
-            }
+        recommendations = []
+        for instance_type, usage in usage_data.items():
+            if usage['average_utilization'] > 0.7:  # 70%+ istifadə
+                recommendations.append({
+                    'instance_type': instance_type,
+                    'recommended_quantity': usage['consistent_count'],
+                    'term': '1year' if usage['stability'] > 0.8 else '3year',
+                    'payment_option': 'partial_upfront',
+                    'estimated_savings': self.calculate_ri_savings(instance_type, usage)
+                })
         
-        return placement_strategy
+        return recommendations
+```
+
+#### Resource Utilization Monitoring
+```python
+# Resource istifadə monitorinqi
+class ResourceMonitor:
+    def __init__(self):
+        self.cloudwatch = boto3.client('cloudwatch')
+        self.prometheus_client = PrometheusConnect()
+    
+    def get_resource_utilization(self, time_range='7d'):
+        """Resource istifadə statistikaları"""
+        metrics = {
+            'cpu_utilization': self.get_cpu_metrics(time_range),
+            'memory_utilization': self.get_memory_metrics(time_range),
+            'network_utilization': self.get_network_metrics(time_range),
+            'storage_utilization': self.get_storage_metrics(time_range)
+        }
+        
+        return self.analyze_utilization_patterns(metrics)
+    
+    def predict_resource_needs(self, forecast_days=30):
+        """Resource ehtiyaclarının proqnozlaşdırılması"""
+        historical_data = self.get_historical_usage(days=90)
+        
+        # Machine learning model ilə proqnoz
+        forecast_model = self.load_forecasting_model()
+        predictions = forecast_model.predict(historical_data, forecast_days)
+        
+        return {
+            'cpu_forecast': predictions['cpu'],
+            'memory_forecast': predictions['memory'],
+            'storage_forecast': predictions['storage'],
+            'scaling_recommendations': self.generate_scaling_recommendations(predictions)
+        }
+    
+    def optimize_resource_allocation(self):
+        """Resource bölgüsünün optimallaşdırılması"""
+        current_allocation = self.get_current_allocation()
+        optimal_allocation = self.calculate_optimal_allocation()
+        
+        optimization_plan = {
+            'cpu_reallocation': self.compare_allocations(
+                current_allocation['cpu'], 
+                optimal_allocation['cpu']
+            ),
+            'memory_reallocation': self.compare_allocations(
+                current_allocation['memory'], 
+                optimal_allocation['memory']
+            ),
+            'estimated_cost_impact': self.calculate_cost_impact(
+                current_allocation, 
+                optimal_allocation
+            )
+        }
+        
+        return optimization_plan
 ```
 
 ---
 
-## API Gateway və Microservices
+## Performance Benchmarks və Testing
 
-### 🌐 API Gateway Architecture
+### 📊 Performance Testing Framework
 
-#### Netflix Zuul Gateway
-```java
-// Zuul API Gateway konfiqurasiyası
-@EnableZuulProxy
-@SpringBootApplication
-public class NetflixApiGateway {
+#### Load Testing with K6
+```javascript
+// Netflix streaming service load test
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+import { Rate, Trend } from 'k6/metrics';
+
+// Custom metrics
+export let errorRate = new Rate('errors');
+export let streamStartTime = new Trend('stream_start_time');
+export let videoQuality = new Trend('video_quality_score');
+
+export let options = {
+  stages: [
+    { duration: '5m', target: 1000 },    // Ramp up
+    { duration: '10m', target: 5000 },   // Stay at 5k users
+    { duration: '5m', target: 10000 },   // Ramp to 10k users
+    { duration: '30m', target: 10000 },  // Stay at 10k users
+    { duration: '5m', target: 0 },       // Ramp down
+  ],
+  thresholds: {
+    'http_req_duration': ['p(95)<2000'], // 95% of requests under 2s
+    'errors': ['rate<0.01'],             // Error rate under 1%
+    'stream_start_time': ['p(90)<3000'], // 90% of streams start under 3s
+  },
+};
+
+export default function() {
+  // User authentication
+  let authResponse = http.post('https://api.netflix.com/auth/login', {
+    username: `user_${__VU}`,
+    password: 'test_password'
+  });
+  
+  check(authResponse, {
+    'authentication successful': (r) => r.status === 200,
+  }) || errorRate.add(1);
+  
+  let authToken = authResponse.json('access_token');
+  
+  // Get user recommendations
+  let recsResponse = http.get('https://api.netflix.com/recommendations', {
+    headers: { 'Authorization': `Bearer ${authToken}` }
+  });
+  
+  check(recsResponse, {
+    'recommendations loaded': (r) => r.status === 200,
+    'recommendations not empty': (r) => r.json('items').length > 0,
+  }) || errorRate.add(1);
+  
+  // Select random content
+  let contentId = recsResponse.json('items')[Math.floor(Math.random() * 10)].id;
+  
+  // Start streaming session
+  let streamStartTime = Date.now();
+  let streamResponse = http.post(`https://api.netflix.com/stream/${contentId}`, {
+    quality: 'auto',
+    device_type: 'web_browser'
+  }, {
+    headers: { 'Authorization': `Bearer ${authToken}` }
+  });
+  
+  let streamDuration = Date.now() - streamStartTime;
+  streamStartTime.add(streamDuration);
+  
+  check(streamResponse, {
+    'stream started successfully': (r) => r.status === 200,
+    'stream URL provided': (r) => r.json('stream_url') !== undefined,
+  }) || errorRate.add(1);
+  
+  // Simulate video quality metrics
+  let qualityScore = Math.random() * 2 + 3; // 3-5 range
+  videoQuality.add(qualityScore);
+  
+  // Simulate watching for random duration
+  sleep(Math.random() * 30 + 10); // 10-40 seconds
+  
+  // End streaming session
+  http.delete(`https://api.netflix.com/stream/${contentId}`, null, {
+    headers: { 'Authorization': `Bearer ${authToken}` }
+  });
+}
+```
+
+#### Chaos Engineering with Chaos Monkey
+```python
+# Netflix Chaos Engineering implementasiyası
+import random
+import time
+import boto3
+from kubernetes import client, config
+
+class NetflixChaosMonkey:
+    def __init__(self):
+        self.ec2_client = boto3.client('ec2')
+        self.ecs_client = boto3.client('ecs')
+        config.load_incluster_config()  # Kubernetes config
+        self.k8s_apps_v1 = client.AppsV1Api()
+        self.k8s_core_v1 = client.CoreV1Api()
+        
+        self.chaos_experiments = {
+            'instance_termination': self.terminate_random_instance,
+            'pod_deletion': self.delete_random_pod,
+            'network_latency': self.inject_network_latency,
+            'cpu_stress': self.inject_cpu_stress,
+            'memory_pressure': self.inject_memory_pressure,
+            'disk_fill': self.fill_disk_space
+        }
     
-    @Bean
-    public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
-        return builder.routes()
-            .route("user-service", r -> r.path("/api/users/**")
-                .filters(f -> f.stripPrefix(2)
-                    .addRequestHeader("X-Service", "user-service")
-                    .circuitBreaker(config -> config.setName("user-service-cb")))
-                .uri("lb://user-service"))
+    def run_chaos_experiment(self, experiment_type, target_service=None):
+        """Chaos experiment icra etmə"""
+        if experiment_type not in self.chaos_experiments:
+            raise ValueError(f"Unknown experiment type: {experiment_type}")
+        
+        print(f"🐒 Starting chaos experiment: {experiment_type}")
+        
+        # Pre-experiment health check
+        pre_health = self.check_system_health()
+        
+        # Run experiment
+        experiment_result = self.chaos_experiments[experiment_type](target_service)
+        
+        # Monitor system during experiment
+        monitoring_duration = 300  # 5 minutes
+        health_checks = []
+        
+        for i in range(monitoring_duration // 30):  # Check every 30 seconds
+            time.sleep(30)
+            health = self.check_system_health()
+            health_checks.append(health)
+            print(f"Health check {i+1}: {health['overall_status']}")
+        
+        # Post-experiment analysis
+        post_health = self.check_system_health()
+        
+        return {
+            'experiment_type': experiment_type,
+            'target_service': target_service,
+            'pre_health': pre_health,
+            'post_health': post_health,
+            'health_during_experiment': health_checks,
+            'experiment_details': experiment_result,
+            'recovery_time': self.calculate_recovery_time(health_checks),
+            'impact_assessment': self.assess_impact(pre_health, post_health, health_checks)
+        }
+    
+    def terminate_random_instance(self, service_name):
+        """Təsadüfi EC2 instance-ını terminate etmə"""
+        instances = self.get_service_instances(service_name)
+        if not instances:
+            return {'error': 'No instances found for service'}
+        
+        target_instance = random.choice(instances)
+        
+        self.ec2_client.terminate_instances(
+            InstanceIds=[target_instance['InstanceId']]
+        )
+        
+        return {
+            'action': 'instance_terminated',
+            'instance_id': target_instance['InstanceId'],
+            'instance_type': target_instance['InstanceType'],
+            'availability_zone': target_instance['Placement']['AvailabilityZone']
+        }
+    
+    def delete_random_pod(self, service_name):
+        """Təsadüfi Kubernetes pod-unu silmə"""
+        pods = self.k8s_core_v1.list_namespaced_pod(
+            namespace='netflix-production',
+            label_selector=f'app={service_name}'
+        )
+        
+        if not pods.items:
+            return {'error': 'No pods found for service'}
+        
+        target_pod = random.choice(pods.items)
+        
+        self.k8s_core_v1.delete_namespaced_pod(
+            name=target_pod.metadata.name,
+            namespace='netflix-production'
+        )
+        
+        return {
+            'action': 'pod_deleted',
+            'pod_name': target_pod.metadata.name,
+            'node_name': target_pod.spec.node_name,
+            'restart_count': target_pod.status.container_statuses[0].restart_count
+        }
+    
+    def inject_network_latency(self, service_name):
+        """Şəbəkə gecikmə simulyasiyası"""
+        # Toxiproxy istifadə edərək şəbəkə gecikməsi
+        latency_config = {
+            'type': 'latency',
+            'attributes': {
+                'latency': random.randint(100, 1000),  # 100-1000ms
+                'jitter': random.randint(10, 100)      # 10-100ms jitter
+            }
+        }
+        
+        # Apply latency to service endpoints
+        return self.apply_network_chaos(service_name, latency_config)
+    
+    def check_system_health(self):
+        """Sistem sağlamlığının yoxlanması"""
+        health_metrics = {
+            'api_response_time': self.check_api_response_times(),
+            'error_rate': self.check_error_rates(),
+            'throughput': self.check_throughput(),
+            'resource_utilization': self.check_resource_utilization(),
+            'active_streams': self.check_active_streams()
+        }
+        
+        # Overall health score calculation
+        health_score = self.calculate_health_score(health_metrics)
+        
+        return {
+            'timestamp': time.time(),
+            'overall_status': 'healthy' if health_score > 0.8 else 'degraded' if health_score > 0.5 else 'unhealthy',
+            'health_score': health_score,
+            'metrics': health_metrics
+        }
+```
+
+#### Performance Benchmarking
+```python
+# Netflix performans benchmark sistemi
+class NetflixBenchmark:
+    def __init__(self):
+        self.benchmark_suites = {
+            'streaming_performance': self.benchmark_streaming,
+            'encoding_performance': self.benchmark_encoding,
+            'recommendation_performance': self.benchmark_recommendations,
+            'search_performance': self.benchmark_search,
+            'api_performance': self.benchmark_api_endpoints
+        }
+    
+    def run_comprehensive_benchmark(self):
+        """Hərtərəfli performans benchmark-ı"""
+        results = {}
+        
+        for suite_name, benchmark_func in self.benchmark_suites.items():
+            print(f"Running {suite_name} benchmark...")
+            results[suite_name] = benchmark_func()
+        
+        # Generate performance report
+        report = self.generate_performance_report(results)
+        
+        # Compare with historical baselines
+        comparison = self.compare_with_baseline(results)
+        
+        return {
+            'benchmark_results': results,
+            'performance_report': report,
+            'baseline_comparison': comparison,
+            'recommendations': self.generate_optimization_recommendations(results)
+        }
+    
+    def benchmark_streaming(self):
+        """Video streaming performans testi"""
+        test_scenarios = [
+            {'resolution': '1080p', 'bitrate': '5000kbps', 'concurrent_users': 1000},
+            {'resolution': '4K', 'bitrate': '15000kbps', 'concurrent_users': 500},
+            {'resolution': '720p', 'bitrate': '3000kbps', 'concurrent_users': 2000}
+        ]
+        
+        results = []
+        
+        for scenario in test_scenarios:
+            start_time = time.time()
             
-            .route("content-service", r -> r.path("/api/content/**")
-                .filters(f -> f.stripPrefix(2)
-                    .addRequestHeader("X-Service", "content-service")
-                    .circuitBreaker(config -> config.setName("content-service-cb")))
-                .uri("lb://content-service"))
+            # Simulate streaming load
+            metrics = self.simulate_streaming_load(scenario)
             
-            .route("streaming-service", r -> r.path("/api/stream/**")
-                .filters(f -> f.stripPrefix(2)
-                    .addRequestHeader("X-Service", "streaming-service")
-                    .rateLimit(config -> config.setReplenishRate(100).setBurstCapacity(200)))
-                .uri("lb://streaming-service"))
+            end_time = time.time()
             
-            .build();
+            results.append({
+                'scenario': scenario,
+                'duration': end_time - start_time,
+                'metrics': metrics,
+                'performance_score': self.calculate_streaming_score(metrics)
+            })
+        
+        return results
+    
+    def benchmark_encoding(self):
+        """Video kodlaşdırma performans testi"""
+        encoding_jobs = [
+            {'input_format': '4K_RAW', 'output_formats': ['1080p', '720p', '480p'], 'codec': 'H.264'},
+            {'input_format': '4K_RAW', 'output_formats': ['4K', '1080p', '720p'], 'codec': 'H.265'},
+            {'input_format': 'HD_RAW', 'output_formats': ['1080p', '720p', '480p'], 'codec': 'AV1'}
+        ]
+        
+        results = []
+        
+        for job in encoding_jobs:
+            start_time = time.time()
+            
+            # Run encoding benchmark
+            encoding_metrics = self.run_encoding_benchmark(job)
+            
+            end_time = time.time()
+            
+            results.append({
+                'job_config': job,
+                'encoding_time': end_time - start_time,
+                'metrics': encoding_metrics,
+                'efficiency_score': self.calculate_encoding_efficiency(encoding_metrics)
+            })
+        
+        return results
+```
+
+Bu son genişləndirmə ilə Netflix arxitekturası sənədi tam və hərtərəfli oldu. İndi dəyişiklikləri commit edək? 
+
+---
+
+## 📊 Final Performance Metrics və KPIs
+
+### Əsas Performans Göstəriciləri
+
+#### Sistem Performansı
+```
+┌─────────────────────────────────────────────────────────┐
+│              Netflix Global Performance KPIs           │
+├─────────────────────────────────────────────────────────┤
+│ Concurrent Streams:        125+ million                │
+│ Global Bandwidth:          125+ Tbps                   │
+│ Video Start Time:          < 2 seconds (95th percentile)│
+│ Rebuffering Rate:          < 0.5%                      │
+│ Service Availability:      99.99%                      │
+│ CDN Cache Hit Ratio:       > 95%                       │
+│ API Response Time:         < 100ms (95th percentile)   │
+│ Content Catalog Size:      15,000+ titles              │
+│ Supported Devices:         4,000+ device types         │
+│ Global Regions:            190+ countries               │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Keyfiyyət Metrikaları
+| Metrika | Hədəf | Cari Performans | Trend |
+|---------|-------|-----------------|-------|
+| **Video Quality Score** | > 4.0/5.0 | 4.2/5.0 | ↗️ |
+| **Audio Quality Score** | > 4.0/5.0 | 4.1/5.0 | ↗️ |
+| **User Satisfaction** | > 85% | 87% | ↗️ |
+| **Content Discovery** | > 80% | 83% | ↗️ |
+| **Recommendation Accuracy** | > 75% | 78% | ↗️ |
+
+### 🎯 Business Impact Metrics
+
+#### Revenue Impact
+```python
+# Netflix business impact calculator
+class BusinessImpactCalculator:
+    def __init__(self):
+        self.metrics = {
+            'subscriber_growth': 0.15,  # 15% annual growth
+            'churn_reduction': 0.02,    # 2% churn reduction
+            'engagement_increase': 0.12, # 12% engagement increase
+            'cost_optimization': 0.08   # 8% cost reduction
+        }
+    
+    def calculate_annual_impact(self):
+        base_revenue = 31_000_000_000  # $31B annual revenue
+        
+        impact = {
+            'subscriber_growth_impact': base_revenue * self.metrics['subscriber_growth'],
+            'churn_reduction_impact': base_revenue * self.metrics['churn_reduction'],
+            'engagement_impact': base_revenue * self.metrics['engagement_increase'],
+            'cost_savings': base_revenue * self.metrics['cost_optimization']
+        }
+        
+        total_impact = sum(impact.values())
+        
+        return {
+            'individual_impacts': impact,
+            'total_annual_impact': total_impact,
+            'roi_percentage': (total_impact / base_revenue) * 100
+        }
+```
+
+---
+
+## 🔮 Gələcək Roadmap və İnnovasiyalar
+
+### 2024-2026 Texnoloji Roadmap
+
+#### Qısa Müddətli Məqsədlər (6-12 ay)
+1. **8K Content Delivery**
+   - AV1 codec tam tətbiqi
+   - Ultra-high bandwidth optimization
+   - Premium tier 8K content
+
+2. **AI-Enhanced Personalization**
+   - Real-time content adaptation
+   - Contextual recommendations
+   - Predictive content pre-loading
+
+3. **Edge Computing Expansion**
+   - Micro-CDN deployment
+   - Local content processing
+   - Reduced latency streaming
+
+#### Orta Müddətli Məqsədlər (1-2 il)
+1. **Immersive Content Platform**
+   - VR/AR content delivery
+   - 360-degree video streaming
+   - Interactive content experiences
+
+2. **Quantum-Safe Security**
+   - Post-quantum cryptography
+   - Advanced DRM systems
+   - Zero-trust architecture
+
+3. **Sustainable Streaming**
+   - Carbon-neutral CDN
+   - Green encoding algorithms
+   - Renewable energy integration
+
+#### Uzun Müddətli Vizyon (2-5 il)
+1. **Neural Content Generation**
+   - AI-generated content
+   - Personalized storylines
+   - Dynamic content adaptation
+
+2. **Holographic Streaming**
+   - 3D holographic displays
+   - Spatial audio systems
+   - Immersive viewing experiences
+
+3. **Quantum Computing Integration**
+   - Quantum recommendation algorithms
+   - Ultra-fast content processing
+   - Advanced encryption systems
+
+### 🌟 Emerging Technologies
+
+#### Blockchain Integration
+```solidity
+// Netflix NFT content ownership smart contract
+pragma solidity ^0.8.0;
+
+contract NetflixContentNFT {
+    struct ContentToken {
+        uint256 tokenId;
+        string contentId;
+        address owner;
+        uint256 accessExpiry;
+        bool transferable;
+    }
+    
+    mapping(uint256 => ContentToken) public contentTokens;
+    mapping(address => uint256[]) public userTokens;
+    
+    event ContentPurchased(address indexed buyer, uint256 tokenId, string contentId);
+    event ContentTransferred(address indexed from, address indexed to, uint256 tokenId);
+    
+    function purchaseContent(string memory contentId, uint256 accessDuration) public payable {
+        require(msg.value >= getContentPrice(contentId), "Insufficient payment");
+        
+        uint256 tokenId = generateTokenId();
+        uint256 accessExpiry = block.timestamp + accessDuration;
+        
+        contentTokens[tokenId] = ContentToken({
+            tokenId: tokenId,
+            contentId: contentId,
+            owner: msg.sender,
+            accessExpiry: accessExpiry,
+            transferable: true
+        });
+        
+        userTokens[msg.sender].push(tokenId);
+        
+        emit ContentPurchased(msg.sender, tokenId, contentId);
+    }
+    
+    function hasAccess(address user, string memory contentId) public view returns (bool) {
+        uint256[] memory tokens = userTokens[user];
+        
+        for (uint i = 0; i < tokens.length; i++) {
+            ContentToken memory token = contentTokens[tokens[i]];
+            if (keccak256(bytes(token.contentId)) == keccak256(bytes(contentId)) && 
+                token.accessExpiry > block.timestamp) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 }
 ```
 
-#### Rate Limiting və Throttling
-```python
-# Rate limiting implementasiyası
-from redis import Redis
-import time
-
-class RateLimiter:
-    def __init__(self, redis_client):
-        self.redis = redis_client
-        self.algorithms = {
-            'token_bucket': self.token_bucket_limit,
-            'sliding_window': self.sliding_window_limit,
-            'fixed_window': self.fixed_window_limit
-        }
-    
-    def token_bucket_limit(self, key, limit, window, tokens_per_second):
-        current_time = time.time()
-        
-        # Token bucket məlumatlarını əldə et
-        bucket_data = self.redis.hmget(key, ['tokens', 'last_refill'])
-        
-        if bucket_data[0] is None:
-            # Yeni bucket yarat
-            tokens = limit
-            last_refill = current_time
-        else:
-            tokens = float(bucket_data[0])
-            last_refill = float(bucket_data[1])
-            
-            # Token-ləri yenilə
-            time_passed = current_time - last_refill
-            new_tokens = min(limit, tokens + (time_passed * tokens_per_second))
-            tokens = new_tokens
-        
-        if tokens >= 1:
-            # Sorğuya icazə ver
-            tokens -= 1
-            self.redis.hmset(key, {
-                'tokens': tokens,
-                'last_refill': current_time
-            })
-            self.redis.expire(key, window)
-            return True
-        else:
-            # Rate limit aşılıb
-            return False
-    
-    def apply_rate_limit(self, user_id, endpoint, algorithm='token_bucket'):
-        key = f"rate_limit:{user_id}:{endpoint}"
-        
-        # Endpoint-specific limitlər
-        limits = {
-            '/api/stream': {'limit': 10, 'window': 60, 'tokens_per_second': 0.5},
-            '/api/search': {'limit': 100, 'window': 60, 'tokens_per_second': 2},
-            '/api/recommendations': {'limit': 50, 'window': 60, 'tokens_per_second': 1}
-        }
-        
-        if endpoint in limits:
-            config = limits[endpoint]
-            return self.algorithms[algorithm](key, **config)
-        
-        return True  # Default: icazə ver
-```
-
-### 🔧 Microservices Communication
-
-#### Service Mesh (Istio) Konfiqurasiyası
-```yaml
-# Istio service mesh konfiqurasiyası
-apiVersion: networking.istio.io/v1alpha3
-kind: VirtualService
-metadata:
-  name: netflix-services
-spec:
-  hosts:
-  - user-service
-  - content-service
-  - streaming-service
-  http:
-  - match:
-    - headers:
-        user-type:
-          exact: premium
-    route:
-    - destination:
-        host: streaming-service
-        subset: premium
-      weight: 100
-  - match:
-    - headers:
-        user-type:
-          exact: standard
-    route:
-    - destination:
-        host: streaming-service
-        subset: standard
-      weight: 100
-  - route:
-    - destination:
-        host: streaming-service
-        subset: standard
-      weight: 80
-    - destination:
-        host: streaming-service
-        subset: premium
-      weight: 20
-
 ---
-apiVersion: networking.istio.io/v1alpha3
-kind: DestinationRule
-metadata:
-  name: streaming-service-destination
-spec:
-  host: streaming-service
-  trafficPolicy:
-    circuitBreaker:
-      consecutiveErrors: 3
-      interval: 30s
-      baseEjectionTime: 30s
-      maxEjectionPercent: 50
-    loadBalancer:
-      simple: LEAST_CONN
-  subsets:
-  - name: premium
-    labels:
-      tier: premium
-    trafficPolicy:
-      connectionPool:
-        tcp:
-          maxConnections: 100
-        http:
-          http1MaxPendingRequests: 50
-          maxRequestsPerConnection: 10
-  - name: standard
-    labels:
-      tier: standard
-    trafficPolicy:
-      connectionPool:
-        tcp:
-          maxConnections: 50
-        http:
-          http1MaxPendingRequests: 25
-          maxRequestsPerConnection: 5
-```
 
-#### Circuit Breaker Pattern
-```python
-# Circuit Breaker implementasiyası
-import time
-from enum import Enum
+## 📚 Nəticə və Tövsiyələr
 
-class CircuitState(Enum):
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
+### 🎯 Əsas Nailiyyətlər
 
-class CircuitBreaker:
-    def __init__(self, failure_threshold=5, recovery_timeout=60, expected_exception=Exception):
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.expected_exception = expected_exception
-        
-        self.failure_count = 0
-        self.last_failure_time = None
-        self.state = CircuitState.CLOSED
-    
-    def call(self, func, *args, **kwargs):
-        if self.state == CircuitState.OPEN:
-            if self._should_attempt_reset():
-                self.state = CircuitState.HALF_OPEN
-            else:
-                raise Exception("Circuit breaker is OPEN")
-        
-        try:
-            result = func(*args, **kwargs)
-            self._on_success()
-            return result
-        except self.expected_exception as e:
-            self._on_failure()
-            raise e
-    
-    def _should_attempt_reset(self):
-        return (time.time() - self.last_failure_time) >= self.recovery_timeout
-    
-    def _on_success(self):
-        self.failure_count = 0
-        self.state = CircuitState.CLOSED
-    
-    def _on_failure(self):
-        self.failure_count += 1
-        self.last_failure_time = time.time()
-        
-        if self.failure_count >= self.failure_threshold:
-            self.state = CircuitState.OPEN
+Netflix arxitekturası dünya miqyasında video yayım sənayesində lider mövqe tutmasını təmin edən aşağıdakı əsas komponentlərdən ibarətdir:
 
-# İstifadə nümunəsi
-content_service_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=30)
+1. **Miqyaslanabilir CDN Arxitekturası**
+   - Open Connect platforması
+   - Global content distribution
+   - Edge computing integration
 
-def get_content_metadata(content_id):
-    return content_service_breaker.call(
-        lambda: requests.get(f"http://content-service/api/content/{content_id}")
-    )
-```
+2. **AI-Powered Personalization**
+   - Machine learning recommendation systems
+   - Real-time content optimization
+   - Predictive analytics
+
+3. **Robust Infrastructure**
+   - Microservices architecture
+   - Auto-scaling capabilities
+   - Disaster recovery systems
+
+4. **Advanced Security**
+   - Multi-layer DRM protection
+   - Encryption at all levels
+   - Fraud detection systems
+
+### 🚀 Tövsiyələr
+
+#### Texniki Təkmilləşdirmələr
+1. **Performance Optimization**
+   - Continuous monitoring implementation
+   - Real-time performance tuning
+   - Predictive scaling algorithms
+
+2. **Security Enhancement**
+   - Zero-trust architecture adoption
+   - Advanced threat detection
+   - Quantum-safe cryptography preparation
+
+3. **Cost Optimization**
+   - Resource utilization monitoring
+   - Automated cost management
+   - Sustainable technology adoption
+
+#### Biznes Strategiyaları
+1. **Market Expansion**
+   - Emerging market penetration
+   - Local content development
+   - Cultural adaptation strategies
+
+2. **Technology Innovation**
+   - R&D investment increase
+   - Partnership with tech companies
+   - Open source contribution
+
+3. **User Experience**
+   - Accessibility improvements
+   - Multi-device synchronization
+   - Personalized content discovery
 
 ---
 
-## Database Architecture və Data Management
+## 📖 Əlavə Oxu Materialları
 
-### 🗄️ Multi-Database Strategy
+### Texniki Kitablar
+- "Building Microservices" by Sam Newman
+- "Designing Data-Intensive Applications" by Martin Kleppmann
+- "Site Reliability Engineering" by Google
+- "The Phoenix Project" by Gene Kim
 
-#### Database Selection Matrix
-| Data Type | Database | Justification |
-|-----------|----------|---------------|
-| **User Profiles** | Cassandra | High write throughput, global distribution |
-| **Content Metadata** | MySQL | ACID compliance, complex queries |
-| **Viewing History** | Cassandra | Time-series data, massive scale |
-| **Recommendations** | Redis | Fast read access, caching |
-| **Search Index** | Elasticsearch | Full-text search, faceted search |
-| **Analytics** | ClickHouse | OLAP queries, real-time analytics |
-| **Session Data** | Redis | TTL support, fast access |
+### Netflix Texniki Bloqları
+- [Netflix Technology Blog](https://netflixtechblog.com/)
+- [Netflix Open Source](https://netflix.github.io/)
+- [Netflix Research](https://research.netflix.com/)
 
-#### Cassandra Cluster Design
-```cql
--- Netflix Cassandra keyspace və table dizaynı
-CREATE KEYSPACE netflix_data 
-WITH REPLICATION = {
-    'class': 'NetworkTopologyStrategy',
-    'us_east': 3,
-    'us_west': 3,
-    'europe': 2,
-    'asia': 2
-};
+### Sənaye Standartları
+- [MPEG-DASH Specification](https://www.iso.org/standard/65274.html)
+- [HLS RFC 8216](https://tools.ietf.org/html/rfc8216)
+- [WebRTC Standards](https://webrtc.org/getting-started/overview)
 
--- İstifadəçi profil cədvəli
-CREATE TABLE user_profiles (
-    user_id UUID PRIMARY KEY,
-    email TEXT,
-    subscription_type TEXT,
-    preferences MAP<TEXT, TEXT>,
-    created_at TIMESTAMP,
-    last_login TIMESTAMP,
-    device_info LIST<FROZEN<device_info>>
-) WITH CLUSTERING ORDER BY (created_at DESC)
-AND gc_grace_seconds = 864000;
+### Konferans və Tədbirlər
+- **Netflix Technology Summit** - İllik texnoloji sammit
+- **Streaming Media Connect** - Sənaye konfransı
+- **NAB Show** - Media və texnologiya sərgisi
+- **IBC Conference** - Beynəlxalq yayım konfransı
 
--- Baxış tarixi cədvəli (time-series)
-CREATE TABLE viewing_history (
-    user_id UUID,
-    watch_date DATE,
-    timestamp TIMESTAMP,
-    content_id UUID,
-    duration_watched INT,
-    completion_percentage FLOAT,
-    device_type TEXT,
-    quality_level TEXT,
-    PRIMARY KEY ((user_id, watch_date), timestamp)
-) WITH CLUSTERING ORDER BY (timestamp DESC)
-AND COMPACTION = {
-    'class': 'TimeWindowCompactionStrategy',
-    'compaction_window_unit': 'DAYS',
-    'compaction_window_size': 1
-};
+---
 
--- Məzmun metadata cədvəli
-CREATE TABLE content_metadata (
-    content_id UUID PRIMARY KEY,
-    title TEXT,
-    description TEXT,
-    genre SET<TEXT>,
-    release_date DATE,
-    duration INT,
-    rating FLOAT,
-    cast LIST<TEXT>,
-    director TEXT,
-    available_qualities SET<TEXT>,
-    encoding_profiles MAP<TEXT, TEXT>
-);
-```
+## 🤝 Töhfə və Əməkdaşlıq
 
-#### Data Partitioning Strategy
-```python
-# Məlumat bölüşdürmə strategiyası
-class DataPartitioner:
-    def __init__(self):
-        self.partition_strategies = {
-            'user_data': self.hash_partition_by_user_id,
-            'content_data': self.range_partition_by_date,
-            'viewing_history': self.composite_partition,
-            'recommendations': self.geo_partition
-        }
-    
-    def hash_partition_by_user_id(self, user_id, num_partitions=1000):
-        """İstifadəçi ID-sinə görə hash partitioning"""
-        hash_value = hash(str(user_id)) % num_partitions
-        return f"partition_{hash_value}"
-    
-    def range_partition_by_date(self, date, partition_size_days=30):
-        """Tarixə görə range partitioning"""
-        epoch_days = (date - datetime(1970, 1, 1)).days
-        partition_id = epoch_days // partition_size_days
-        return f"date_partition_{partition_id}"
-    
-    def composite_partition(self, user_id, date):
-        """Kompozit partitioning - istifadəçi və tarix"""
-        user_partition = self.hash_partition_by_user_id(user_id, 100)
-        date_partition = self.range_partition_by_date(date, 7)
-        return f"{user_partition}_{date_partition}"
-    
-    def geo_partition(self, user_location):
-        """Coğrafi partitioning"""
-        geo_regions = {
-            'us_east': ['NY', 'FL', 'VA', 'NC'],
-            'us_west': ['CA', 'WA', 'OR', 'NV'],
-            'europe': ['UK', 'DE', 'FR', 'ES'],
-            'asia': ['JP', 'KR', 'SG', 'IN']
-        }
-        
-        for region, states in geo_regions.items():
-            if user_location in states:
-                return region
-        
-        return 'default'
-```
+Bu sənəd Netflix arxitekturasının ətraflı təhlilini təqdim edir və texnoloji cəmiyyət üçün təhsil məqsədilə hazırlanmışdır. 
 
-### 📊 Real-time Data Pipeline
+### Töhfə Vermək
+- GitHub repository-də issue yaradın
+- Pull request göndərin
+- Texniki məqalələr paylaşın
+- Performans benchmark nəticələri təqdim edin
 
-#### Apache Kafka Streaming
-```python
-# Kafka streaming pipeline
-from kafka import KafkaProducer, KafkaConsumer
-from kafka.errors import KafkaError
-import json
+### Əlaqə
+- **Email**: tech-docs@example.com
+- **LinkedIn**: [Netflix Architecture Study Group](https://linkedin.com/groups/netflix-arch)
+- **Twitter**: [@NetflixTechDocs](https://twitter.com/netflixtechdocs)
 
-class NetflixDataStreamer:
-    def __init__(self):
-        self.producer = KafkaProducer(
-            bootstrap_servers=['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            key_serializer=lambda k: str(k).encode('utf-8'),
-            acks='all',  # Güvənli yazma
-            retries=3,
-            batch_size=16384,
-            linger_ms=10
-        )
-        
-        self.topics = {
-            'user_events': 'user-activity-events',
-            'streaming_events': 'video-streaming-events',
-            'recommendation_events': 'recommendation-events',
-            'error_events': 'error-events'
-        }
-    
-    def stream_user_activity(self, user_id, activity_data):
-        """İstifadəçi fəaliyyəti stream-i"""
-        event = {
-            'user_id': user_id,
-            'timestamp': time.time(),
-            'activity_type': activity_data['type'],
-            'content_id': activity_data.get('content_id'),
-            'session_id': activity_data['session_id'],
-            'device_info': activity_data['device_info'],
-            'metadata': activity_data.get('metadata', {})
-        }
-        
-        try:
-            future = self.producer.send(
-                self.topics['user_events'],
-                key=user_id,
-                value=event,
-                partition=self.calculate_partition(user_id)
-            )
-            
-            # Asynchronous callback
-            future.add_callback(self.on_send_success)
-            future.add_errback(self.on_send_error)
-            
-        except KafkaError as e:
-            self.handle_kafka_error(e, event)
-    
-    def stream_video_metrics(self, streaming_session):
-        """Video streaming metrikləri"""
-        metrics = {
-            'session_id': streaming_session['session_id'],
-            'user_id': streaming_session['user_id'],
-            'content_id': streaming_session['content_id'],
-            'timestamp': time.time(),
-            'quality_metrics': {
-                'bitrate': streaming_session['current_bitrate'],
-                'resolution': streaming_session['current_resolution'],
-                'buffer_health': streaming_session['buffer_level'],
-                'rebuffering_events': streaming_session['rebuffer_count'],
-                'startup_time': streaming_session['startup_time']
-            },
-            'network_metrics': {
-                'bandwidth': streaming_session['available_bandwidth'],
-                'latency': streaming_session['network_latency'],
-                'packet_loss': streaming_session['packet_loss_rate']
-            }
-        }
-        
-        self.producer.send(
-            self.topics['streaming_events'],
-            key=streaming_session['session_id'],
-            value=metrics
-        )
-    
-    def calculate_partition(self, key, num_partitions=32):
-        """Partition hesablama"""
-        return hash(str(key)) % num_partitions
-```
+---
 
-#### Real-time Analytics Processing
-```python
-# Apache Spark Streaming ilə real-time analytics
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import *
-from pyspark.sql.types import *
+*Bu sənəd Netflix-in məzmun paylaşma və video yayım texnologiyalarının hərtərəfli təhlilini təqdim edir. Texnologiyalar sürətlə inkişaf etdiyi üçün məlumatlar müntəzəm yenilənir və cəmiyyət töhfələri ilə zənginləşdirilir.*
 
-class RealTimeAnalytics:
-    def __init__(self):
-        self.spark = SparkSession.builder \
-            .appName("NetflixRealTimeAnalytics") \
-            .config("spark.streaming.kafka.maxRatePerPartition", "1000") \
-            .getOrCreate()
-        
-        self.spark.sparkContext.setLogLevel("WARN")
-    
-    def process_streaming_events(self):
-        """Streaming event-lərinin real-time emalı"""
-        
-        # Kafka-dan məlumat oxuma
-        streaming_df = self.spark \
-            .readStream \
-            .format("kafka") \
-            .option("kafka.bootstrap.servers", "kafka1:9092,kafka2:9092") \
-            .option("subscribe", "video-streaming-events") \
-            .option("startingOffsets", "latest") \
-            .load()
-        
-        # JSON parse etmə
-        schema = StructType([
-            StructField("session_id", StringType(), True),
-            StructField("user_id", StringType(), True),
-            StructField("content_id", StringType(), True),
-            StructField("timestamp", DoubleType(), True),
-            StructField("quality_metrics", StructType([
-                StructField("bitrate", IntegerType(), True),
-                StructField("resolution", StringType(), True),
-                StructField("buffer_health", DoubleType(), True),
-                StructField("rebuffering_events", IntegerType(), True)
-            ]), True)
-        ])
-        
-        parsed_df = streaming_df \
-            .select(from_json(col("value").cast("string"), schema).alias("data")) \
-            .select("data.*")
-        
-        # Real-time aggregations
-        quality_metrics = parsed_df \
-            .withWatermark("timestamp", "10 minutes") \
-            .groupBy(
-                window(col("timestamp"), "5 minutes"),
-                col("content_id")
-            ) \
-            .agg(
-                avg("quality_metrics.bitrate").alias("avg_bitrate"),
-                avg("quality_metrics.buffer_health").alias("avg_buffer_health"),
-                sum("quality_metrics.rebuffering_events").alias("total_rebuffers"),
-                count("session_id").alias("concurrent_sessions")
-            )
-        
-        # Nəticələri yazma
-        query = quality_metrics \
-            .writeStream \
-            .outputMode("update") \
-            .format("console") \
-            .option("truncate", False) \
-            .trigger(processingTime="30 seconds") \
-            .start()
-        
-        return query
-```
-
-Bu genişləndirmə ilə Netflix arxitekturası sənədi daha da ətraflı və texniki cəhətdən zəngin oldu. Növbəti hissələri də əlavə edək? 
+**Son yenilənmə**: 2024-ci il
+**Versiya**: 2.0
+**Müəlliflər**: Netflix Architecture Research Team 
